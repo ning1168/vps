@@ -1,9 +1,13 @@
 {
+  "$schema": "https://sing-box.sagernet.org/schema.json",
+
   "log": {
     "level": "info",
     "timestamp": true
   },
+
   "dns": {
+
     "servers": [
       {
         "type": "local",
@@ -16,6 +20,7 @@
         "server_port": 443,
         "path": "/dns-query",
         "detour": "手动选择",
+
         "domain_resolver": {
           "server": "本地DNS",
           "strategy": "ipv4_only"
@@ -23,57 +28,77 @@
       }
     ],
     "rules": [
+
       {
-        "clash_mode": "direct",
+        "clash_mode": "Direct",
         "action": "route",
         "server": "本地DNS"
       },
       {
-        "clash_mode": "global",
+        "clash_mode": "Global",
         "action": "route",
         "server": "代理DNS"
       },
+
       {
-        "rule_set": "规则集-广告",
-        "action": "reject",
-        "method": "default"
+        "domain_suffix": "qq.com",
+        "action": "route",
+        "server": "本地DNS"
       },
+
       {
         "rule_set": [
           "规则集-国内域名",
-          "规则集-苹果",
-          "规则集-微软"
+          "规则集-苹果服务",
+          "规则集-微软服务"
         ],
         "action": "route",
         "server": "本地DNS"
       },
+
       {
-        "rule_set": "规则集-谷歌",
+        "rule_set": "规则集-谷歌服务",
         "action": "route",
         "server": "代理DNS"
       }
     ],
+
     "final": "代理DNS",
+
     "strategy": "ipv4_only"
   },
+
+  "http_clients": [
+    {
+      "tag": "规则集下载",
+      "detour": "手动选择"
+    }
+  ],
+
   "inbounds": [
     {
       "type": "tun",
       "tag": "tun-in",
+
       "address": [
         "172.19.0.1/30"
       ],
       "mtu": 9000,
       "auto_route": true,
+
       "strict_route": true,
-      "stack": "mixed"
+      "stack": "mixed",
+
+      "dns_mode": "hijack"
     }
   ],
+
   "outbounds": [
     {
       "type": "direct",
       "tag": "直连"
     },
+
     {
       "type": "selector",
       "tag": "手动选择",
@@ -81,8 +106,9 @@
         "自动选择",
         "节点-占位符"
       ],
-      "default": "节点-占位符"
+      "default": "自动选择"
     },
+
     {
       "type": "urltest",
       "tag": "自动选择",
@@ -123,76 +149,109 @@
       ],
       "default": "手动选择"
     },
+
     {
       "type": "shadowsocks",
       "tag": "节点-占位符",
       "server": "127.0.0.1",
       "server_port": 1080,
       "method": "aes-256-gcm",
-      "password": "placeholder-will-be-replaced-by-substore"
+      "password": "placeholder-replaced-by-sub-store"
     }
   ],
+
   "route": {
+
     "rules": [
+
       {
         "action": "sniff"
       },
+
       {
-        "protocol": "dns",
+        "type": "logical",
+        "mode": "or",
+        "rules": [
+          {
+            "protocol": "dns"
+          },
+          {
+            "port": 53
+          }
+        ],
         "action": "hijack-dns"
       },
+
       {
         "protocol": "quic",
         "action": "reject"
       },
       {
+        "network": "udp",
+        "port": 443,
+        "action": "reject"
+      },
+
+      {
         "port": 853,
         "action": "reject"
       },
+
       {
-        "rule_set": "规则集-广告",
+        "rule_set": "规则集-广告终结",
         "action": "reject"
       },
+
       {
         "ip_is_private": true,
         "action": "route",
         "outbound": "直连"
       },
+
       {
-        "clash_mode": "direct",
+        "ip_version": 6,
+        "action": "reject"
+      },
+
+      {
+        "clash_mode": "Direct",
         "action": "route",
         "outbound": "直连"
       },
       {
-        "clash_mode": "global",
+        "clash_mode": "Global",
         "action": "route",
         "outbound": "手动选择"
       },
+
       {
         "domain_suffix": "qq.com",
         "action": "route",
         "outbound": "直连"
       },
+
       {
         "ip_cidr": "192.0.2.100/32",
         "action": "route",
         "outbound": "手动选择"
       },
+
       {
-        "rule_set": "规则集-谷歌",
+        "rule_set": "规则集-谷歌服务",
         "action": "route",
         "outbound": "谷歌服务"
       },
       {
-        "rule_set": "规则集-苹果",
+        "rule_set": "规则集-苹果服务",
         "action": "route",
         "outbound": "苹果服务"
       },
       {
-        "rule_set": "规则集-微软",
+        "rule_set": "规则集-微软服务",
         "action": "route",
         "outbound": "微软服务"
       },
+
       {
         "rule_set": "规则集-国内域名",
         "action": "route",
@@ -207,10 +266,9 @@
     "rule_set": [
       {
         "type": "remote",
-        "tag": "规则集-广告",
+        "tag": "规则集-广告终结",
         "format": "binary",
         "url": "https://gcore.jsdelivr.net/gh/217heidai/adblockfilters@main/rules/adblocksingbox.srs",
-        "download_detour": "直连",
         "update_interval": "1d"
       },
       {
@@ -218,31 +276,27 @@
         "tag": "规则集-国内域名",
         "format": "binary",
         "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-cn.srs",
-        "download_detour": "直连",
         "update_interval": "1d"
       },
       {
         "type": "remote",
-        "tag": "规则集-谷歌",
+        "tag": "规则集-谷歌服务",
         "format": "binary",
         "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-google.srs",
-        "download_detour": "直连",
         "update_interval": "1d"
       },
       {
         "type": "remote",
-        "tag": "规则集-苹果",
+        "tag": "规则集-苹果服务",
         "format": "binary",
         "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-apple.srs",
-        "download_detour": "直连",
         "update_interval": "1d"
       },
       {
         "type": "remote",
-        "tag": "规则集-微软",
+        "tag": "规则集-微软服务",
         "format": "binary",
         "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-microsoft.srs",
-        "download_detour": "直连",
         "update_interval": "1d"
       },
       {
@@ -250,26 +304,33 @@
         "tag": "规则集-国内IP",
         "format": "binary",
         "url": "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-cn.srs",
-        "download_detour": "直连",
         "update_interval": "1d"
       }
     ],
     "final": "手动选择",
+
     "auto_detect_interface": true,
-    "default_domain_resolver": "本地DNS"
+
+    "default_domain_resolver": {
+      "server": "本地DNS",
+      "strategy": "ipv4_only"
+    },
+
+    "default_http_client": "规则集下载"
   },
+
   "experimental": {
+    "cache_file": {
+
+      "enabled": true,
+      "path": "cache.db"
+    },
     "clash_api": {
       "external_controller": "127.0.0.1:9090",
+
       "external_ui": "ui",
-      "external_ui_download_url": "https://gcore.jsdelivr.net/gh/MetaCubeX/metacubexd@gh-pages/compressed-dist.zip",
-      "external_ui_download_detour": "直连",
-      "default_mode": "rule"
-    },
-    "cache_file": {
-      "enabled": true,
-      "path": "cache.db",
-      "store_fakeip": false
+      "external_ui_download_url": "https://github.com/MetaCubeX/metacubexd/archive/gh-pages.zip",
+      "default_mode": "Rule"
     }
   }
 }
