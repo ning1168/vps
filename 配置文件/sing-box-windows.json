@@ -276,7 +276,8 @@
     ],
     "final": "手动选择",
     "auto_detect_interface": true,
-    "default_http_client": "默认HTTP客户端"
+    "default_http_client": "默认HTTP客户端",
+    "default_domain_resolver": "阿里DNS"
   },
   "experimental": {
     "cache_file": {

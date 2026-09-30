@@ -113,8 +113,10 @@ for (const p of nodes) {
   // 否则按 sing-box 1.14 拨号逻辑（common/dialer/dialer.go NewDNSQueryOptions）：
   //   - 新式 DNS 服务器(newDialer) 缺 resolver 会直接报错；
   //   - 新式代理出站缺 resolver 会触发本条弃用警告（missing route.default_domain_resolver or domain_resolver）。
-  // 判 IP：先剥掉 :port，再判断是否为纯 IPv4 / 含冒号的 IPv6；其余一律视为域名。
-  const host = String(p.server ?? '').replace(/:\d+$/, '');
+  // 判 IP：先剥掉 :port（含 [IPv6]:port 的方括号），再判断是否为纯 IPv4 / 含冒号的 IPv6；其余一律视为域名。
+  let host = String(p.server ?? '');
+  host = host.replace(/^\[(.+)\](:\d+)?$/, '$1');  // [2001:db8::1] 或 [2001:db8::1]:443 → 2001:db8::1
+  host = host.replace(/:\d+$/, '');                // a.com:443 / 1.2.3.4:443 → 去掉端口
   const isIPv4 = /^(\d{1,3}\.){3}\d{1,3}$/.test(host);
   const isIPv6 = host.includes(':');
   if (!isIPv4 && !isIPv6 && host) {

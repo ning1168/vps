@@ -262,7 +262,8 @@
       }
     ],
     "final": "手动选择",
-    "auto_detect_interface": true
+    "auto_detect_interface": true,
+    "default_domain_resolver": "阿里DNS"
   },
   "experimental": {
     "cache_file": {
