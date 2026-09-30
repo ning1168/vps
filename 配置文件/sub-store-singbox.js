@@ -1,134 +1,157 @@
-/**
- * Sub-Store sing-box 注入脚本（文件/File 型，远程引用）
- * ------------------------------------------------------------------
- * 与常见做法一致：脚本读取一份"底模"配置（$files[0]，纯 JSON 无注释），
- * 用 produceArtifact 拉取订阅/组合的节点，注入「手动选择 / 自动选择」两个组，
- * 普通协议进 outbounds；wireguard / tailscale 进顶层 endpoints（sing-box 1.14 语法）。
- *
- * 在 Sub-Store 里的用法（远程脚本 + 参数写在 URL 末尾的 # 里）：
- *   https://.../sing-box-sub-store.js#name=你的订阅名&type=0
- *   参数：
- *     name  = 订阅或组合名称（必填）
- *     type  = 0/sub/subscription 表示订阅；1/col/collection 表示组合（默认订阅）
- *   并在"脚本操作/文件"里绑定底模：$files[0] = singbox-windows.json（或 android/ios）
- *
- * 说明：底模必须是纯 JSON（本仓库 config/*.json 已去掉注释），
- *       因为这里用 JSON.parse 读取，标准 JSON.parse 不支持注释。
- */
+// sing-box 配置注入脚本（Sub-Store 文件功能 · 脚本操作）
+// 适用：Sub-Store 后端（Node.js 环境）「文件」流程，目标平台 sing-box
+// 用法：在 Sub-Store「文件」中新建一个文件（来源为 sing-box 配置模板 JSON），
+//       给该文件添加「脚本操作」，脚本内容为本文件全文，
+//       脚本参数（# 后）示例：#sub=机场订阅名&template=https://你的模板地址/config.json
+// 接口出处（Sub-Store 官方仓库 master 分支，均已核对）：
+//   $arguments        —— scripts/demo.js 及 backend/src/core/proxy-utils/processors/index.js（createDynamicFunction 注入）
+//   $files / $content —— backend/src/core/proxy-utils/processors/index.js 文件脚本包裹（$files 为数组，$content 为字符串）
+//   produceArtifact   —— backend/src/restful/sync.js（export 的全局函数，脚本环境注入见 processors/index.js）
+//   ProxyUtils.JSON5  —— backend/src/core/proxy-utils/index.js（容忍模板中的尾逗号等 JSON5 语法）
+//   $substore         —— backend/src/vendor/open-api.js（$.http / $.read / $.write 等）
+// 失败处理原则：任何一步失败都 throw 明确原因，Sub-Store 会将错误透出到响应，绝不静默返回未注入的模板。
 
-const { name, type } = $arguments;
+const {
+  sub = '',       // 订阅名或组合订阅名（Sub-Store「订阅管理」里的 name）
+  template = ''   // 模板地址；留空则用文件自身内容（$files[0] / $content）作为模板
+} = $arguments;
 
-// COMPATIBLE 兜底出口：订阅为空时，避免 urltest/selector 出现空 outbounds（非法）
-const compatibleOutbound = { tag: 'COMPATIBLE', type: 'direct' };
-
-// 1) 读取底模
-if (!$files || !$files[0]) {
-    throw new Error('未绑定底模文件：$files[0] 为空，请在脚本操作里绑定 config/*.json');
+if (!sub || typeof sub !== 'string') {
+  throw new Error('sing-box 注入脚本：缺少脚本参数 sub（订阅名/组合订阅名），请在脚本链接 # 后加 sub=xxx');
 }
+
+// 1. 取模板：优先用 #template= 指定的远程地址，其次用文件自身内容
+let tplRaw = '';
+if (template) {
+  const resp = await $substore.http.get(template);
+  tplRaw = (resp && (resp.body ?? resp.rawBody)) ?? '';
+  if (!tplRaw) throw new Error(`sing-box 注入脚本：模板下载为空或失败：${template}`);
+} else {
+  // 文件流程：多来源时取第一个文件内容；单文件时 $content 即模板字符串
+  tplRaw = (Array.isArray($files) && $files[0]) || $content || '';
+  if (!tplRaw) throw new Error('sing-box 注入脚本：文件内容为空，请检查 Sub-Store 文件的来源配置');
+}
+
+// 2. 解析模板（JSON5 容忍尾逗号；解析失败给出定位提示）
 let config;
 try {
-    config = JSON.parse($files[0]);
+  config = (ProxyUtils.JSON5 || JSON).parse(tplRaw);
 } catch (e) {
-    throw new Error('底模 JSON 解析失败（请确认为纯 JSON、无注释）：' + e.message);
+  throw new Error(`sing-box 注入脚本：模板不是合法 JSON/JSON5：${e.message ?? e}`);
 }
-if (!Array.isArray(config.outbounds)) {
-    throw new Error('底模缺少 outbounds 数组');
-}
-if (!name) {
-    throw new Error('缺少 $arguments.name（订阅/组合名称）');
+if (!config || typeof config !== 'object' || Array.isArray(config)) {
+  throw new Error('sing-box 注入脚本：模板根节点必须是 JSON 对象');
 }
 
-// 2) 拉取节点（sing-box 出站对象数组）
-const artifactType =
-    type === '1' || /^col(lection)?$/i.test(String(type || ''))
-        ? 'collection'
-        : 'subscription';
-
-let produced = await produceArtifact({
-    name,
-    type: artifactType,
-    platform: 'sing-box',
-    produceType: 'internal',
-});
+// 3. 拉取订阅节点（internal 产出 = sing-box 出站对象数组）
+//    先按单条订阅拉取；失败再按组合订阅拉取；都失败则报出真实原因
+let produced = null;
+let lastErr = '';
+for (const type of ['subscription', 'collection']) {
+  try {
+    produced = await produceArtifact({ type, name: sub, platform: 'sing-box', produceType: 'internal' });
+    if (Array.isArray(produced)) break;
+  } catch (e) {
+    lastErr = `${type}: ${e.message ?? e}`;
+    produced = null;
+  }
+}
 if (!Array.isArray(produced)) {
-    throw new Error('produceArtifact 未返回数组，请检查订阅是否可用');
+  throw new Error(`sing-box 注入脚本：拉取订阅「${sub}」失败（${lastErr || '未知原因'}），请确认订阅名拼写及订阅是否可正常解析`);
 }
 
-// 3) 过滤机场信息节点（流量/到期/官网等非真实节点）
-const infoKeywords =
-    /网址|网站|获取|订阅|流量|到期|余量|续费|过期|重置|套餐|官网|面板|剩余|更新|expire|traffic|reset|plan|manual|通知|公告|说明|教程|客服|频道|群组/i;
+// 4. 只保留真正的出站对象（带 type 字段），endpoints（wireguard/tailscale）不注入 outbounds
+const TYPE_WHITELIST = ['shadowsocks', 'vmess', 'vless', 'trojan', 'hysteria', 'hysteria2', 'tuic', 'shadowtls', 'anytls', 'socks', 'http', 'ssh', 'direct'];
+const raw = produced.filter(p => p && typeof p === 'object' && typeof p.type === 'string' && TYPE_WHITELIST.includes(p.type));
+const droppedByType = produced.length - raw.length;
 
-// 底模中已存在的 tag（策略组名、direct 等），避免节点与之重名
-const reserved = new Set(
-    []
-        .concat(config.outbounds || [])
-        .concat(config.endpoints || [])
-        .map((o) => o && o.tag)
-        .filter(Boolean),
-);
-
-const seen = new Set();
-const nodeOutbounds = [];
-const nodeEndpoints = [];
-
-for (const item of produced) {
-    if (!item || typeof item !== 'object' || !item.type || !item.tag) continue;
-    const tag = String(item.tag).trim();
-    if (!tag || infoKeywords.test(tag)) continue; // 过滤信息节点
-    if (seen.has(tag) || reserved.has(tag)) continue; // 去重 + 避免撞名
-    seen.add(tag);
-    item.tag = tag;
-    // wireguard / tailscale 属于 endpoint，必须放顶层 endpoints
-    if (item.type === 'wireguard' || item.type === 'tailscale') {
-        nodeEndpoints.push(item);
-    } else {
-        nodeOutbounds.push(item);
-    }
+// 5. 过滤机场信息节点（流量、到期、官网等非节点条目）——按名称特征，不区分协议
+const INFO_RE = /(剩余流量|流量|套餐|到期|过期|官网|官方网站|官方|工单|客服|群|TG|Telegram|地址|节点|更新|订阅|公告|说明|距离|重置|运营|倍率|限速|加油|续费|购买|邀请)/i;
+const nodes = [];
+const droppedInfo = [];
+for (const p of raw) {
+  const name = `${p.tag ?? p.name ?? ''}`;
+  if (INFO_RE.test(name)) { droppedInfo.push(name); continue; }
+  nodes.push(p);
 }
 
-const proxyTags = [
-    ...nodeOutbounds.map((o) => o.tag),
-    ...nodeEndpoints.map((o) => o.tag),
-];
-
-// 4) 写入节点本体
-config.outbounds.push(...nodeOutbounds);
-if (nodeEndpoints.length > 0) {
-    if (!Array.isArray(config.endpoints)) config.endpoints = [];
-    config.endpoints.push(...nodeEndpoints);
+if (nodes.length === 0) {
+  throw new Error(`sing-box 注入脚本：订阅「${sub}」解析出 0 个可用节点（原始 ${produced.length} 条，类型不符 ${droppedByType} 条，信息节点过滤 ${droppedInfo.length} 条）。请检查订阅内容或联系机场。`);
 }
 
-// 5) 注入到「手动选择」(selector) 与「自动选择」(urltest)
-for (const outbound of config.outbounds) {
-    if (!outbound || !Array.isArray(outbound.outbounds)) continue;
-    if (outbound.type === 'selector' && outbound.tag === '手动选择') {
-        const exist = new Set(outbound.outbounds);
-        for (const t of proxyTags) if (!exist.has(t)) outbound.outbounds.push(t);
-    }
-    if (outbound.type === 'urltest' && outbound.tag === '自动选择') {
-        outbound.outbounds = [...proxyTags]; // 测速组只放真实节点
-    }
+// 6. 收集模板中已存在的出站 tag，避免与内置组重名导致节点被覆盖
+const builtinTags = new Set((config.outbounds || []).map(o => o && o.tag).filter(Boolean));
+const RESERVED = ['手动选择', '自动选择', '苹果服务', '微软服务', '谷歌服务', '直连', '代理'];
+for (const r of RESERVED) builtinTags.add(r);
+
+// 7. 重命名：节点与内置 tag 冲突，或节点之间重名，一律加后缀，不丢节点
+const seen = new Map(); // tag -> 已用次数
+const finalNodes = [];
+const renamed = [];
+for (const p of nodes) {
+  const oldTag = `${p.tag ?? p.name ?? ''}`.trim();
+  if (!oldTag) { renamed.push('(无名节点，已跳过)'); continue; }
+  let newTag = oldTag;
+  if (builtinTags.has(newTag) || seen.has(newTag)) {
+    let n = seen.get(oldTag) ?? 1;
+    do { n += 1; newTag = `${oldTag} ${n}`; } while (builtinTags.has(newTag) || seen.has(newTag));
+    renamed.push(`${oldTag} → ${newTag}`);
+  }
+  seen.set(oldTag, (seen.get(oldTag) ?? 0) + 1);
+  seen.set(newTag, 1);
+  p.tag = newTag;
+  delete p.name;
+  // 域名型服务器需要 domain_resolver 指向模板内已定义的 DNS 服务器，否则 1.14 起可能报错
+  if (typeof p.server === 'string' && !/^(\d{1,3}\.){3}\d{1,3}$/.test(p.server) && !p.server.includes(':')) {
+    p.domain_resolver = p.domain_resolver ?? '阿里DNS';
+  }
+  finalNodes.push(p);
 }
 
-// 6) 空组兜底：任何 outbounds 为空的 selector/urltest 补 COMPATIBLE
-let needCompatible = false;
-for (const outbound of config.outbounds) {
-    if (
-        (outbound.type === 'urltest' || outbound.type === 'selector') &&
-        Array.isArray(outbound.outbounds) &&
-        outbound.outbounds.length === 0
-    ) {
-        outbound.outbounds.push(compatibleOutbound.tag);
-        needCompatible = true;
-    }
-}
-if (needCompatible && !config.outbounds.some((o) => o.tag === 'COMPATIBLE')) {
-    config.outbounds.push(compatibleOutbound);
+if (finalNodes.length === 0) {
+  throw new Error(`sing-box 注入脚本：全部节点均无有效名称，无法注入（共 ${nodes.length} 条）`);
 }
 
-// 7) 调试信息（Sub-Store 日志可见）
-console.log(
-    `[sing-box inject] type=${artifactType} name=${name} outbounds=${nodeOutbounds.length} endpoints=${nodeEndpoints.length}`,
-);
+const nodeTags = finalNodes.map(p => p.tag);
+
+// 8. 写回 outbounds：替换模板中的占位符，并填充策略组
+const outbounds = Array.isArray(config.outbounds) ? config.outbounds : [];
+const result = [];
+let injectedNodes = false;
+let filledManual = false, filledAuto = false;
+
+for (const o of outbounds) {
+  if (!o || typeof o !== 'object') { result.push(o); continue; }
+  if (o.tag === '__NODES__') {           // 节点占位符：展开为全部节点
+    result.push(...finalNodes);
+    injectedNodes = true;
+    continue;
+  }
+  if (o.type === 'selector' && o.tag === '手动选择' && Array.isArray(o.outbounds)) {
+    o.outbounds = o.outbounds.flatMap(t => (t === '__NODES__' ? nodeTags : [t]));
+    filledManual = true;
+  }
+  if (o.type === 'urltest' && o.tag === '自动选择' && Array.isArray(o.outbounds)) {
+    o.outbounds = o.outbounds.flatMap(t => (t === '__NODES__' ? nodeTags : [t]));
+    filledAuto = true;
+  }
+  result.push(o);
+}
+
+if (!injectedNodes) throw new Error('sing-box 注入脚本：模板 outbounds 中未找到 {"tag":"__NODES__"} 占位符，节点无处注入');
+if (!filledManual)   throw new Error('sing-box 注入脚本：模板中未找到 tag 为「手动选择」的 selector 出站，或其 outbounds 不含 "__NODES__"');
+if (!filledAuto)     throw new Error('sing-box 注入脚本：模板中未找到 tag 为「自动选择」的 urltest 出站，或其 outbounds 不含 "__NODES__"');
+
+config.outbounds = result;
+
+// 9. 输出（必须是字符串；同时把处理摘要写进 Sub-Store 日志，便于排查）
+const summary = [
+  `订阅「${sub}」：原始 ${produced.length} 条`,
+  droppedByType ? `类型不符/端点跳过 ${droppedByType} 条` : null,
+  droppedInfo.length ? `信息节点过滤 ${droppedInfo.length} 条（${droppedInfo.slice(0, 3).join('、')}${droppedInfo.length > 3 ? '…' : ''}）` : null,
+  renamed.length ? `重名/内置冲突改名 ${renamed.length} 条（${renamed.slice(0, 3).join('、')}${renamed.length > 3 ? '…' : ''}）` : null,
+  `最终注入 ${finalNodes.length} 个节点`
+].filter(Boolean).join('；');
+$substore.info(`[sing-box 注入] ${summary}`);
 
 $content = JSON.stringify(config, null, 2);
