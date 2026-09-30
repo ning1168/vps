@@ -1,0 +1,276 @@
+{
+  "log": {
+    "level": "warn",
+    "timestamp": true
+  },
+  "dns": {
+    "servers": [
+      {
+        "type": "local",
+        "tag": "系统DNS"
+      },
+      {
+        "type": "https",
+        "tag": "阿里DNS",
+        "server": "223.5.5.5"
+      },
+      {
+        "type": "https",
+        "tag": "云端DNS",
+        "server": "1.1.1.1",
+        "detour": "手动选择",
+        "domain_resolver": "阿里DNS"
+      }
+    ],
+    "rules": [
+      {
+        "query_type": [
+          "AAAA",
+          "HTTPS"
+        ],
+        "action": "predefined",
+        "rcode": "NOERROR"
+      },
+      {
+        "rule_set": "广告拦截",
+        "action": "predefined",
+        "rcode": "NXDOMAIN"
+      },
+      {
+        "clash_mode": "Direct",
+        "action": "route",
+        "server": "阿里DNS"
+      },
+      {
+        "clash_mode": "Global",
+        "action": "route",
+        "server": "云端DNS"
+      },
+      {
+        "rule_set": "GitHub",
+        "action": "route",
+        "server": "云端DNS"
+      },
+      {
+        "rule_set": [
+          "苹果服务",
+          "微软服务",
+          "国内域名"
+        ],
+        "action": "route",
+        "server": "阿里DNS"
+      },
+      {
+        "rule_set": "谷歌服务",
+        "action": "route",
+        "server": "云端DNS"
+      }
+    ],
+    "final": "云端DNS",
+    "strategy": "ipv4_only"
+  },
+  "inbounds": [
+    {
+      "type": "tun",
+      "tag": "tun入站",
+      "address": "172.19.0.1/30",
+      "mtu": 9000,
+      "auto_route": true,
+      "strict_route": true
+    }
+  ],
+  "outbounds": [
+    {
+      "type": "selector",
+      "tag": "手动选择",
+      "outbounds": [
+        "自动选择",
+        "__NODES__"
+      ],
+      "default": "自动选择"
+    },
+    {
+      "type": "urltest",
+      "tag": "自动选择",
+      "outbounds": [
+        "__NODES__"
+      ],
+      "url": "https://www.gstatic.com/generate_204",
+      "interval": "3m",
+      "tolerance": 50
+    },
+    {
+      "type": "selector",
+      "tag": "苹果服务",
+      "outbounds": [
+        "直连",
+        "手动选择",
+        "自动选择"
+      ],
+      "default": "直连"
+    },
+    {
+      "type": "selector",
+      "tag": "微软服务",
+      "outbounds": [
+        "直连",
+        "手动选择",
+        "自动选择"
+      ],
+      "default": "直连"
+    },
+    {
+      "type": "selector",
+      "tag": "谷歌服务",
+      "outbounds": [
+        "手动选择",
+        "自动选择",
+        "直连"
+      ],
+      "default": "手动选择"
+    },
+    {
+      "type": "direct",
+      "tag": "直连"
+    },
+    {
+      "tag": "__NODES__"
+    }
+  ],
+  "route": {
+    "rules": [
+      {
+        "action": "sniff"
+      },
+      {
+        "protocol": "dns",
+        "action": "hijack-dns"
+      },
+      {
+        "protocol": "quic",
+        "action": "reject"
+      },
+      {
+        "ip_is_private": true,
+        "action": "route",
+        "outbound": "直连"
+      },
+      {
+        "clash_mode": "Direct",
+        "action": "route",
+        "outbound": "直连"
+      },
+      {
+        "clash_mode": "Global",
+        "action": "route",
+        "outbound": "手动选择"
+      },
+      {
+        "rule_set": "广告拦截",
+        "action": "reject"
+      },
+      {
+        "domain_suffix": "qq.com",
+        "action": "route",
+        "outbound": "直连"
+      },
+      {
+        "ip_cidr": "192.0.2.100/32",
+        "action": "route",
+        "outbound": "手动选择"
+      },
+      {
+        "rule_set": "苹果服务",
+        "action": "route",
+        "outbound": "苹果服务"
+      },
+      {
+        "rule_set": "GitHub",
+        "action": "route",
+        "outbound": "手动选择"
+      },
+      {
+        "rule_set": "微软服务",
+        "action": "route",
+        "outbound": "微软服务"
+      },
+      {
+        "rule_set": "谷歌服务",
+        "action": "route",
+        "outbound": "谷歌服务"
+      },
+      {
+        "rule_set": "国内域名",
+        "action": "route",
+        "outbound": "直连"
+      },
+      {
+        "rule_set": "国内IP",
+        "action": "route",
+        "outbound": "直连"
+      }
+    ],
+    "rule_set": [
+      {
+        "type": "remote",
+        "tag": "广告拦截",
+        "format": "binary",
+        "url": "https://gcore.jsdelivr.net/gh/217heidai/adblockfilters@main/rules/adblocksingbox.srs",
+        "update_interval": "1d"
+      },
+      {
+        "type": "remote",
+        "tag": "苹果服务",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-apple.srs",
+        "update_interval": "1d"
+      },
+      {
+        "type": "remote",
+        "tag": "GitHub",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-github.srs",
+        "update_interval": "1d"
+      },
+      {
+        "type": "remote",
+        "tag": "微软服务",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-microsoft.srs",
+        "update_interval": "1d"
+      },
+      {
+        "type": "remote",
+        "tag": "谷歌服务",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-google.srs",
+        "update_interval": "1d"
+      },
+      {
+        "type": "remote",
+        "tag": "国内域名",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-cn.srs",
+        "update_interval": "1d"
+      },
+      {
+        "type": "remote",
+        "tag": "国内IP",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-cn.srs",
+        "update_interval": "1d"
+      }
+    ],
+    "final": "手动选择",
+    "auto_detect_interface": true
+  },
+  "experimental": {
+    "cache_file": {
+      "enabled": true
+    },
+    "clash_api": {
+      "external_controller": "127.0.0.1:9090",
+      "default_mode": "Rule"
+    }
+  }
+}
