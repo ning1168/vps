@@ -1,250 +1,137 @@
-/***************************************
- * 中国联通 App Cookie 自动获取
- * 平台: QuantumultX (兼容 Loon / Surge 语法习惯)
- * 版本: 1.0.0
- * 更新: 2026-10-01
- * -------------------------------------
- * 【抓包来源】
- *   中国联通 iOS 客户端  iphone_c@12.1001 (build:6)
- *   UA: ChinaUnicom4.x/12.10.1 (com.chinaunicom.mobilebusiness; build:6; iOS) Alamofire/4.7.3
- *   登录域名: loginxx.10010.com / m.client.10010.com / m.10010.com / mxx.client.10010.com
- *
- * 【关键登录态 Cookie(抓包实测)】
- *   c_id        登录态唯一标识(64位hex)          —— 核心
- *   t3_token    会话令牌(32位hex)               —— 核心
- *   ecs_token   加密令牌(JWT样 base64)          —— 核心
- *   ecs_acc     加密手机号(与 enc_acc 同值)     —— 核心
- *   c_mobile    手机号 / u_account 手机号
- *   cw_mutual   风控校验串(128位hex)
- *   invalid_at  失效校验串(64位hex)
- *   login_type  登录方式(06=验证码/本机)
- *   PvSessionId / devicedId / d_deviceCode  设备会话
- *   city        号码归属(如 051|536|91413589|-99)
- *   channel     GGPD   c_version: iphone_c@12.1001
- *
- * 【工作方式】
- *   拦截请求头 Cookie → 与本地已存 Cookie 合并 → 核心字段齐全才入库
- *   → 仅当登录态指纹(c_id+t3_token+ecs_token)变化时写入并通知, 避免刷屏
- *
- * 【使用说明 · QuantumultX】
- *   1) [mitm] hostname 增加:
- *      loginxx.10010.com, m.client.10010.com, m.10010.com, mxx.client.10010.com, hlclient.10010.com
- *   2) [rewrite_local] 添加(任选, 推荐第 1 条即可覆盖登录全流程):
- *      ^https?:\/\/(loginxx|m|mxx)\.(client\.)?10010\.com\/ url script-request-header https://raw.githubusercontent.com/ning1168/vps/main/js/liantong_cookie.js
- *   3) 打开联通 App 触发一次请求即可自动抓取
- *
- * 【可选 · 远程推送】在 QX 中执行一次即可开启(把 Cookie POST 给你的服务器):
- *   $prefs.setValueForKey("https://your.host/api/unipush", "liantong_cookie_push")
- *   关闭: $prefs.setValueForKey("", "liantong_cookie_push")
- *
- * 【可选 · 查看已存 Cookie】浏览器/App 内访问任意一条命中域名的链接并带上:
- *   ?liantong_cookie_query=1
- *   脚本会直接返回已保存的 Cookie(JSON)
- ***************************************/
+/******************************
+ * 中国联通 App Cookie 获取 (QuantumultX)
+ * 抓包: 联通 iOS iphone_c@12.1001
+ * 核心字段: c_id / t3_token / ecs_token
+ * 存储键: liantong_cookie
+ * 提示: 收到通知后【点击通知】即自动复制 Cookie 到剪贴板
+ * 配置: 直接导入同目录 liantong_cookie.conf 即可(含 mitm + rewrite + 去广告)
+ ******************************/
 
-const LT_COOKIE_KEY = 'liantong_cookie';        // 完整 Cookie 存储键
-const LT_META_KEY   = 'liantong_cookie_meta';   // 指纹/手机号/时间
-const LT_PUSH_KEY   = 'liantong_cookie_push';   // 可选远程推送地址
-
-const CORE_FIELDS = ['c_id', 't3_token', 'ecs_token'];   // 判定"已登录"的核心字段
-
-// 输出顺序(其余字段自动追加在后面)
-const KEEP_FIELDS = [
+const CKEY = 'liantong_cookie';       // 完整 Cookie
+const MKEY = 'liantong_cookie_meta';  // 手机号/时间/指纹
+const PKEY = 'liantong_cookie_push';  // 可选: 远程推送地址
+const CORE = ['c_id', 't3_token', 'ecs_token'];
+const ORDER = [
   'ecs_token', 't3_token', 'PvSessionId', 'devicedId', 'd_deviceCode',
   'cw_mutual', 'login_type', 'c_mobile', 'c_id', 'u_areaCode', 'c_version',
   'channel', 'wo_family', 'u_account', 'city', 'invalid_at', 'ecs_acc',
-  'enc_acc', 'third_token', 'random_login', 'app_13_num', 'tag-service',
-  'JSESSIONID', 'SHAREJSESSIONID', 'acw_tc'
+  'enc_acc', 'third_token', 'random_login'
 ];
 
-/* ---------------- 存储适配(QX / Loon / Surge) ---------------- */
-const store = {
-  get(k) {
-    try {
-      if (typeof $prefs !== 'undefined' && $prefs.valueForKey) return $prefs.valueForKey(k);
-      if (typeof $persistentStore !== 'undefined' && $persistentStore.read) return $persistentStore.read(k);
-    } catch (e) {}
-    return null;
-  },
-  set(v, k) {
-    try {
-      if (typeof $prefs !== 'undefined' && $prefs.setValueForKey) return $prefs.setValueForKey(v, k);
-      if (typeof $persistentStore !== 'undefined' && $persistentStore.write) return $persistentStore.write(v, k);
-    } catch (e) {}
-    return false;
-  }
-};
-
-function notify(title, sub, body) {
-  try {
-    if (typeof $notify !== 'undefined') { $notify(title, sub, body); return; }
-    if (typeof $notification !== 'undefined') { $notification.post(title, sub, body); return; }
-  } catch (e) {}
+function get(k) {
+  try { if (typeof $prefs !== 'undefined') return $prefs.valueForKey(k); } catch (e) {}
+  try { if (typeof $persistentStore !== 'undefined') return $persistentStore.read(k); } catch (e) {}
+  return null;
 }
-
-function log(msg) { console.log('[联通Cookie] ' + msg); }
-
-/* ---------------- Cookie 工具 ---------------- */
-function headerOf(headers, name) {
-  if (!headers) return '';
-  const hit = Object.keys(headers).find(k => k.toLowerCase() === name.toLowerCase());
-  return hit ? headers[hit] : '';
+function set(v, k) {
+  try { if (typeof $prefs !== 'undefined') return $prefs.setValueForKey(v, k); } catch (e) {}
+  try { if (typeof $persistentStore !== 'undefined') return $persistentStore.write(v, k); } catch (e) {}
+  return false;
 }
-
-function parseCookie(str) {
-  const map = {};
-  String(str || '').split(';').forEach(item => {
-    const s = item.trim();
-    if (!s) return;
-    const i = s.indexOf('=');
-    if (i < 1) return;
-    const k = s.slice(0, i).trim();
-    const v = s.slice(i + 1).trim();
-    if (k) map[k] = v;
+function hdr(h, name) {
+  if (!h) return '';
+  const k = Object.keys(h).find(x => x.toLowerCase() === name.toLowerCase());
+  return k ? h[k] : '';
+}
+function parse(str) {
+  const m = {};
+  String(str || '').split(';').forEach(it => {
+    const s = it.trim(), i = s.indexOf('=');
+    if (i > 0) m[s.slice(0, i).trim()] = s.slice(i + 1).trim();
   });
-  return map;
+  return m;
 }
-
-// 从 Set-Cookie(可能是数组)中提取 名=值
-function parseSetCookie(val) {
-  const map = {};
-  if (!val) return map;
-  const list = Array.isArray(val) ? val : [val];
-  list.forEach(one => {
-    const first = String(one).split(';')[0].trim();
-    const i = first.indexOf('=');
-    if (i > 0) {
-      const k = first.slice(0, i).trim();
-      const v = first.slice(i + 1).trim();
-      // 过滤无意义的空占位(如 logHostIP=)
-      if (k && v) map[k] = v;
-    }
+function parseSet(v) {
+  const m = {};
+  (Array.isArray(v) ? v : [v]).forEach(one => {
+    const f = String(one || '').split(';')[0].trim(), i = f.indexOf('=');
+    if (i > 0 && f.slice(i + 1).trim()) m[f.slice(0, i).trim()] = f.slice(i + 1).trim();
   });
-  return map;
+  return m;
 }
-
-function buildCookie(map) {
-  const keys = [];
-  KEEP_FIELDS.forEach(k => { if (map[k] !== undefined && map[k] !== '' && !keys.includes(k)) keys.push(k); });
-  Object.keys(map).forEach(k => {
-    // 跳过设备本地/统计类噪音字段
-    if (/^(_pk_|tfstk|tianjin|SHOP_PROV_CITY|gipgeo|mallcity|ecs_cook|logHostIP$)/.test(k)) return;
-    if (map[k] !== '' && !keys.includes(k)) keys.push(k);
+function build(m) {
+  const ks = ORDER.filter(k => m[k]);
+  Object.keys(m).forEach(k => {
+    if (!m[k] || ks.includes(k)) return;
+    if (/^(_pk_|tfstk|tianjin|SHOP_PROV_CITY|gipgeo|mallcity|ecs_cook|logHostIP$|JSESSIONID|acw_tc)/.test(k)) return;
+    ks.push(k);
   });
-  return keys.map(k => k + '=' + map[k]).join('; ');
+  return ks.map(k => k + '=' + m[k]).join('; ');
+}
+function now() {
+  return new Date(Date.now() + 8 * 3600 * 1000).toISOString().replace('T', ' ').slice(0, 19);
 }
 
-function fingerprint(map) {
-  return [map.c_id, map.t3_token, map.ecs_token, map.c_mobile, map.invalid_at]
-    .map(v => v || '-').join('|');
-}
-
-function short(v, n) {
-  v = String(v || '');
-  return v.length > n ? v.slice(0, n) + '…' : v;
-}
-
-function nowStr() {
-  const d = new Date(Date.now() + 8 * 3600 * 1000); // 东八区
-  return d.toISOString().replace('T', ' ').slice(0, 19);
-}
-
-/* ---------------- 主流程 ---------------- */
 (async () => {
-  const url = ($request && $request.url) || '';
+  const url = (typeof $request !== 'undefined' && $request && $request.url) || '';
 
-  // ===== 查询模式: ?liantong_cookie_query=1 =====
-  if (/liantong_cookie_query/.test(url)) {
-    const cookie = store.get(LT_COOKIE_KEY) || '';
+  // 复制页: m.10010.com/lt_cookie_copy
+  if (/lt_cookie_copy/.test(url)) {
+    const ck = get(CKEY) || '';
     let meta = {};
-    try { meta = JSON.parse(store.get(LT_META_KEY) || '{}'); } catch (e) {}
-    const body = JSON.stringify({
-      code: cookie ? 0 : -1,
-      msg: cookie ? 'ok' : '尚未获取到联通 Cookie, 请打开联通 App 触发一次请求',
-      phone: meta.phone || '',
-      updated: meta.updated || '',
-      cookie: cookie
-    });
-    $done({
-      status: 'HTTP/1.1 200 OK',
-      headers: { 'Content-Type': 'application/json;charset=UTF-8' },
-      body: body
-    });
+    try { meta = JSON.parse(get(MKEY) || '{}'); } catch (e) {}
+    const esc = ck.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const html = '<!doctype html><html><head><meta charset="utf-8">' +
+      '<meta name="viewport" content="width=device-width,initial-scale=1">' +
+      '<title>联通 Cookie</title></head><body style="font:15px -apple-system;padding:16px">' +
+      '<h3 style="margin:0 0 6px">联通 Cookie</h3>' +
+      '<p style="color:#888;font-size:13px;margin:0 0 10px">' +
+      (ck ? '账号: ' + (meta.phone || '未知') + ' · 更新: ' + (meta.updated || '') : '尚未获取到 Cookie, 请打开联通 App 触发一次请求') +
+      '</p><textarea readonly style="width:100%;height:65vh;font:12px monospace;box-sizing:border-box;padding:8px">' +
+      esc + '</textarea></body></html>';
+    $done({ status: 'HTTP/1.1 200 OK', headers: { 'Content-Type': 'text/html;charset=UTF-8' }, body: html });
     return;
   }
 
   try {
-    const reqHeaders = (typeof $request !== 'undefined' && $request && $request.headers) || {};
-    const respHeaders = (typeof $response !== 'undefined' && $response && $response.headers) || {};
-    const reqMap = parseCookie(headerOf(reqHeaders, 'cookie'));
-    const respMap = parseSetCookie(headerOf(respHeaders, 'set-cookie'));
-    const incoming = Object.assign({}, reqMap, respMap);
-    const got = Object.keys(incoming).length;
-    if (!got) { log('本次未携带 Cookie, 跳过'); $done({}); return; }
-
-    // 与本地已存 Cookie 合并(新旧互补, 新值优先)
-    const merged = Object.assign({}, parseCookie(store.get(LT_COOKIE_KEY)));
-    Object.keys(incoming).forEach(k => { if (incoming[k] !== '') merged[k] = incoming[k]; });
-
-    // 登录态校验
-    const missing = CORE_FIELDS.filter(k => !merged[k]);
-    if (missing.length) {
-      log('未登录完成, 缺少核心字段: ' + missing.join(', '));
-      $done({});
-      return;
-    }
-
-    // 指纹比对: 登录态未变化则只做静默更新(刷新 JSESSIONID 等易变字段), 不重复通知
-    const fp = fingerprint(merged);
-    let old = {};
-    try { old = JSON.parse(store.get(LT_META_KEY) || '{}'); } catch (e) {}
-
-    const cookie = buildCookie(merged);
-
-    if (old.fp === fp && store.get(LT_COOKIE_KEY)) {
-      if (store.get(LT_COOKIE_KEY) !== cookie) {
-        store.set(cookie, LT_COOKIE_KEY);
-        old.updated = nowStr();
-        store.set(JSON.stringify(old), LT_META_KEY);
-        log('登录态未变化, 已静默更新易变字段');
-      } else {
-        log('登录态未变化, 跳过');
-      }
-      $done({});
-      return;
-    }
-
-    const phone = merged.c_mobile || merged.u_account || '';
-    const meta = { fp: fp, phone: phone, updated: nowStr(), count: (old.count || 0) + 1 };
-
-    store.set(cookie, LT_COOKIE_KEY);
-    store.set(JSON.stringify(meta), LT_META_KEY);
-
-    log('✅ Cookie 已更新 (' + (meta.count) + ' 次) 手机号: ' + phone);
-    log('c_id=' + short(merged.c_id, 16) + ' t3_token=' + merged.t3_token);
-
-    notify(
-      '联通 Cookie 获取成功',
-      '账号: ' + (phone || '未知') + '  ' + meta.updated,
-      'c_id: ' + short(merged.c_id, 24) + '\nt3_token: ' + merged.t3_token
+    const incoming = Object.assign(
+      {},
+      parse(hdr((typeof $request !== 'undefined' && $request && $request.headers) || {}, 'cookie')),
+      parseSet(hdr((typeof $response !== 'undefined' && $response && $response.headers) || {}, 'set-cookie'))
     );
+    if (!Object.keys(incoming).length) { $done({}); return; }
 
-    // ===== 可选: 远程推送 =====
-    const pushUrl = store.get(LT_PUSH_KEY);
-    if (pushUrl && /^https?:\/\//.test(pushUrl) && typeof $task !== 'undefined') {
+    const m = Object.assign({}, parse(get(CKEY)));
+    Object.keys(incoming).forEach(k => { if (incoming[k]) m[k] = incoming[k]; });
+
+    const miss = CORE.filter(k => !m[k]);
+    if (miss.length) { console.log('[联通Cookie] 未登录, 缺少 ' + miss.join(',')); $done({}); return; }
+
+    const cookie = build(m);
+    const fp = [m.c_id, m.t3_token, m.ecs_token, m.c_mobile, m.invalid_at].join('|');
+    let old = {};
+    try { old = JSON.parse(get(MKEY) || '{}'); } catch (e) {}
+
+    // 登录态未变: 只静默刷新易变字段
+    if (old.fp === fp && get(CKEY)) {
+      if (get(CKEY) !== cookie) { set(cookie, CKEY); old.updated = now(); set(JSON.stringify(old), MKEY); }
+      $done({});
+      return;
+    }
+
+    const phone = m.c_mobile || m.u_account || '';
+    const meta = { fp: fp, phone: phone, updated: now(), count: (old.count || 0) + 1 };
+    set(cookie, CKEY);
+    set(JSON.stringify(meta), MKEY);
+    console.log('[联通Cookie] 更新成功 ' + phone + ' | ' + m.t3_token);
+
+    // 通知: 点击通知即复制 Cookie 到剪贴板
+    try {
+      $notify('联通 Cookie 获取成功', '账号 ' + phone + ' · ' + meta.updated,
+        '点击本通知自动复制 Cookie',
+        { 'update-pasteboard': cookie, 'open-url': 'https://m.10010.com/lt_cookie_copy' });
+    } catch (e) {}
+
+    const push = get(PKEY);
+    if (push && /^https?:\/\//.test(push) && typeof $task !== 'undefined') {
       $task.fetch({
-        url: pushUrl,
-        method: 'POST',
+        url: push, method: 'POST',
         headers: { 'Content-Type': 'application/json;charset=UTF-8' },
         body: JSON.stringify({ phone: phone, cookie: cookie, updated: meta.updated })
-      }).then(
-        r => log('远程推送完成: HTTP ' + (r && r.statusCode)),
-        e => log('远程推送失败: ' + e)
-      );
+      }).then(r => console.log('[联通Cookie] 推送 ' + (r && r.statusCode)), e => console.log('[联通Cookie] 推送失败'));
     }
   } catch (e) {
-    log('脚本异常: ' + e);
+    console.log('[联通Cookie] 异常: ' + e);
   }
-
   $done({});
 })();
