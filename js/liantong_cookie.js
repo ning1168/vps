@@ -1,10 +1,9 @@
 /******************************
- * 中国联通 App Cookie 获取 (QuantumultX)
- * 抓包: 联通 iOS iphone_c@12.1001
- * 核心字段: c_id / t3_token / ecs_token
- * 存储键: liantong_cookie
- * 提示: 收到通知后【点击通知】即自动复制 Cookie 到剪贴板
- * 配置: 直接导入同目录 liantong_cookie.conf 即可(含 mitm + rewrite + 去广告)
+ * 联通 Cookie 抓取 | 2026-10-01
+ * App: 中国联通 iOS (iphone_c@12.1001)
+ * 平台: QuantumultX
+ * 说明: 抓到登录态后存 $prefs, 点击通知自动复制 Cookie
+ * 规则: 见同目录 liantong_cookie.conf
  ******************************/
 
 const CKEY = 'liantong_cookie';       // 完整 Cookie
