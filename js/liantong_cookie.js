@@ -1,20 +1,28 @@
 /******************************
  * 联通 Cookie 抓取 | 2026-10-01
  * App: 中国联通 iOS (iphone_c@12.1001)
- * 平台: QuantumultX
- * 说明: 抓到登录态后存 $prefs, 点击通知自动复制 Cookie
+ * 触发: 进「剩余话费 / 剩余流量」页面才弹通知
+ * 通知: 正文显示完整 Cookie, 点击即复制, 不跳网页
  * 规则: 见同目录 liantong_cookie.conf
  ******************************/
 
-const CKEY = 'liantong_cookie';       // 完整 Cookie
-const MKEY = 'liantong_cookie_meta';  // 手机号/时间/指纹
-const PKEY = 'liantong_cookie_push';  // 可选: 远程推送地址
-const CORE = ['c_id', 't3_token', 'ecs_token'];
+const KEY = 'liantong_cookie';        // Cookie 存储键
+const META = 'liantong_cookie_meta';  // 指纹/时间
+const CORE = ['c_id', 't3_token', 'ecs_token'];  // 登录态核心字段
+const GAP = 10 * 60 * 1000;           // 同一登录态 10 分钟内不重复弹
+
+// 触发点: 点首页「剩余话费 / 剩余流量」进入时才会命中
+const TRIGGER = [
+  '/servicequerybusiness/balancenew/accountBalancenew.htm',
+  '/servicequerybusiness/accountDay/check',
+  '/mobileService/customer/getShareRedisInfo.htm'
+];
+
 const ORDER = [
-  'ecs_token', 't3_token', 'PvSessionId', 'devicedId', 'd_deviceCode',
-  'cw_mutual', 'login_type', 'c_mobile', 'c_id', 'u_areaCode', 'c_version',
-  'channel', 'wo_family', 'u_account', 'city', 'invalid_at', 'ecs_acc',
-  'enc_acc', 'third_token', 'random_login'
+  'ecs_token', 't3_token', 'PvSessionId', 'devicedId', 'cw_mutual',
+  'login_type', 'c_mobile', 'c_id', 'u_areaCode', 'c_version', 'channel',
+  'wo_family', 'u_account', 'city', 'invalid_at', 'ecs_acc', 'enc_acc',
+  'third_token', 'random_login'
 ];
 
 function get(k) {
@@ -27,9 +35,9 @@ function set(v, k) {
   try { if (typeof $persistentStore !== 'undefined') return $persistentStore.write(v, k); } catch (e) {}
   return false;
 }
-function hdr(h, name) {
+function hdr(h, n) {
   if (!h) return '';
-  const k = Object.keys(h).find(x => x.toLowerCase() === name.toLowerCase());
+  const k = Object.keys(h).find(x => x.toLowerCase() === n.toLowerCase());
   return k ? h[k] : '';
 }
 function parse(str) {
@@ -57,78 +65,53 @@ function build(m) {
   });
   return ks.map(k => k + '=' + m[k]).join('; ');
 }
+function mask(p) {
+  p = String(p || '');
+  return p.length === 11 ? p.slice(0, 3) + '****' + p.slice(7) : (p || '未知');
+}
 function now() {
   return new Date(Date.now() + 8 * 3600 * 1000).toISOString().replace('T', ' ').slice(0, 19);
 }
 
 (async () => {
-  const url = (typeof $request !== 'undefined' && $request && $request.url) || '';
-
-  // 复制页: m.10010.com/lt_cookie_copy
-  if (/lt_cookie_copy/.test(url)) {
-    const ck = get(CKEY) || '';
-    let meta = {};
-    try { meta = JSON.parse(get(MKEY) || '{}'); } catch (e) {}
-    const esc = ck.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    const html = '<!doctype html><html><head><meta charset="utf-8">' +
-      '<meta name="viewport" content="width=device-width,initial-scale=1">' +
-      '<title>联通 Cookie</title></head><body style="font:15px -apple-system;padding:16px">' +
-      '<h3 style="margin:0 0 6px">联通 Cookie</h3>' +
-      '<p style="color:#888;font-size:13px;margin:0 0 10px">' +
-      (ck ? '账号: ' + (meta.phone || '未知') + ' · 更新: ' + (meta.updated || '') : '尚未获取到 Cookie, 请打开联通 App 触发一次请求') +
-      '</p><textarea readonly style="width:100%;height:65vh;font:12px monospace;box-sizing:border-box;padding:8px">' +
-      esc + '</textarea></body></html>';
-    $done({ status: 'HTTP/1.1 200 OK', headers: { 'Content-Type': 'text/html;charset=UTF-8' }, body: html });
-    return;
-  }
-
   try {
-    const incoming = Object.assign(
+    const url = (typeof $request !== 'undefined' && $request && $request.url) || '';
+    const inc = Object.assign(
       {},
       parse(hdr((typeof $request !== 'undefined' && $request && $request.headers) || {}, 'cookie')),
       parseSet(hdr((typeof $response !== 'undefined' && $response && $response.headers) || {}, 'set-cookie'))
     );
-    if (!Object.keys(incoming).length) { $done({}); return; }
+    if (!Object.keys(inc).length) { $done({}); return; }
 
-    const m = Object.assign({}, parse(get(CKEY)));
-    Object.keys(incoming).forEach(k => { if (incoming[k]) m[k] = incoming[k]; });
-
-    const miss = CORE.filter(k => !m[k]);
-    if (miss.length) { console.log('[联通Cookie] 未登录, 缺少 ' + miss.join(',')); $done({}); return; }
+    const m = Object.assign({}, parse(get(KEY)), inc);
+    if (CORE.some(k => !m[k])) { console.log('[联通Cookie] 未登录, 跳过'); $done({}); return; }
 
     const cookie = build(m);
-    const fp = [m.c_id, m.t3_token, m.ecs_token, m.c_mobile, m.invalid_at].join('|');
     let old = {};
-    try { old = JSON.parse(get(MKEY) || '{}'); } catch (e) {}
+    try { old = JSON.parse(get(META) || '{}'); } catch (e) {}
 
-    // 登录态未变: 只静默刷新易变字段
-    if (old.fp === fp && get(CKEY)) {
-      if (get(CKEY) !== cookie) { set(cookie, CKEY); old.updated = now(); set(JSON.stringify(old), MKEY); }
+    // 有新内容就静默存下来, 保持 Cookie 新鲜(不弹通知)
+    if (get(KEY) !== cookie) set(cookie, KEY);
+
+    // 只在触发页 + (换了登录态 或 超过间隔) 时弹通知
+    const hit = TRIGGER.some(t => url.indexOf(t) >= 0);
+    if (!hit) { $done({}); return; }
+    if (old.cid === m.c_id && Date.now() - (old.last || 0) < GAP) {
+      console.log('[联通Cookie] 已是最新, 不重复提醒');
       $done({});
       return;
     }
 
-    const phone = m.c_mobile || m.u_account || '';
-    const meta = { fp: fp, phone: phone, updated: now(), count: (old.count || 0) + 1 };
-    set(cookie, CKEY);
-    set(JSON.stringify(meta), MKEY);
-    console.log('[联通Cookie] 更新成功 ' + phone + ' | ' + m.t3_token);
+    const phone = mask(m.c_mobile || m.u_account);
+    const time = now();
+    set(JSON.stringify({ cid: m.c_id, phone: phone, last: Date.now(), updated: time }), META);
+    console.log('[联通Cookie] 已获取 ' + phone);
 
-    // 通知: 点击通知即复制 Cookie 到剪贴板
+    // 通知正文 = 完整 Cookie; 点击通知复制到剪贴板, 不跳转网页
     try {
-      $notify('联通 Cookie 获取成功', '账号 ' + phone + ' · ' + meta.updated,
-        '点击本通知自动复制 Cookie',
-        { 'update-pasteboard': cookie, 'open-url': 'https://m.10010.com/lt_cookie_copy' });
+      $notify('联通 Cookie 已获取', phone + ' · ' + time + ' · 点击复制',
+        cookie, { 'update-pasteboard': cookie });
     } catch (e) {}
-
-    const push = get(PKEY);
-    if (push && /^https?:\/\//.test(push) && typeof $task !== 'undefined') {
-      $task.fetch({
-        url: push, method: 'POST',
-        headers: { 'Content-Type': 'application/json;charset=UTF-8' },
-        body: JSON.stringify({ phone: phone, cookie: cookie, updated: meta.updated })
-      }).then(r => console.log('[联通Cookie] 推送 ' + (r && r.statusCode)), e => console.log('[联通Cookie] 推送失败'));
-    }
   } catch (e) {
     console.log('[联通Cookie] 异常: ' + e);
   }
