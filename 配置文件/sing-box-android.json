@@ -159,7 +159,7 @@
         "type": "remote",
         "format": "binary",
         "url": "https://gcore.jsdelivr.net/gh/217heidai/adblockfilters@main/rules/adblocksingbox.srs",
-        "http_client": { "detour": "直连" },
+        "http_client": { "detour": "自动选择" },
         "update_interval": "1d"
       },
       {
