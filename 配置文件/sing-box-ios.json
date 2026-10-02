@@ -106,6 +106,10 @@
         "protocol": "dns",
         "action": "hijack-dns"
       },
+      {
+        "rule_set": "广告拦截",
+        "action": "reject"
+      },
        // ↓↓↓ 模式切换（面板/仪表盘上的「模式」按钮就是靠这两条生成的）↓↓↓
       // 全局：所有流量走代理（想固定某个节点，把 outbound 改成那个节点的 tag）
       {
@@ -118,10 +122,6 @@
         "clash_mode": "Direct",
         "action": "route",
         "outbound": "直连"
-      },
-      {
-        "rule_set": "广告拦截",
-        "action": "reject"
       },
       {
         "port": 853,
