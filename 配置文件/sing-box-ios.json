@@ -20,6 +20,11 @@
       }
     ],
     "rules": [
+      {
+        "clash_mode": "Direct",
+        "action": "route",
+        "server": "本地DNS"
+      },
       // 示例：自定义直连域名，照此行加
       {
         "domain_suffix": ["qq.com"],
@@ -100,6 +105,19 @@
       {
         "protocol": "dns",
         "action": "hijack-dns"
+      },
+       // ↓↓↓ 模式切换（面板/仪表盘上的「模式」按钮就是靠这两条生成的）↓↓↓
+      // 全局：所有流量走代理（想固定某个节点，把 outbound 改成那个节点的 tag）
+      {
+        "clash_mode": "Global",
+        "action": "route",
+        "outbound": "手动选择"
+      },
+      // 直连：所有流量直连，不走任何规则
+      {
+        "clash_mode": "Direct",
+        "action": "route",
+        "outbound": "直连"
       },
       {
         "rule_set": "广告拦截",
