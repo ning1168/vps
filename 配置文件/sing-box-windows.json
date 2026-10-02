@@ -1,7 +1,8 @@
 {
   "$schema": "https://sing-box.sagernet.org/schema.json",
   "log": {
-    "level": "info",
+    // 出错才报；可选 warn(含警告) | info(全部连接日志,刷屏) | debug(调试)
+    "level": "error",
     "timestamp": true
   },
   "dns": {
@@ -167,7 +168,7 @@
         "tag": "国内域名",
         "type": "remote",
         "format": "binary",
-        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-cn.srs",
+        "url": "https://gcore.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-cn.srs",
         "http_client": { "detour": "自动选择" },
         "update_interval": "1d"
       },
@@ -175,7 +176,7 @@
         "tag": "国内IP",
         "type": "remote",
         "format": "binary",
-        "url": "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-cn.srs",
+        "url": "https://gcore.jsdelivr.net/gh/SagerNet/sing-geoip@rule-set/geoip-cn.srs",
         "http_client": { "detour": "自动选择" },
         "update_interval": "1d"
       },
@@ -183,7 +184,7 @@
         "tag": "苹果域名",
         "type": "remote",
         "format": "binary",
-        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-apple.srs",
+        "url": "https://gcore.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-apple.srs",
         "http_client": { "detour": "自动选择" },
         "update_interval": "1d"
       },
@@ -191,7 +192,7 @@
         "tag": "微软域名",
         "type": "remote",
         "format": "binary",
-        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-microsoft.srs",
+        "url": "https://gcore.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-microsoft.srs",
         "http_client": { "detour": "自动选择" },
         "update_interval": "1d"
       },
@@ -199,7 +200,7 @@
         "tag": "谷歌域名",
         "type": "remote",
         "format": "binary",
-        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-google.srs",
+        "url": "https://gcore.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-google.srs",
         "http_client": { "detour": "自动选择" },
         "update_interval": "1d"
       }
