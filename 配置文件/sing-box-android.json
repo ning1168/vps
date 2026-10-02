@@ -1,147 +1,96 @@
 {
+  "$schema": "https://sing-box.sagernet.org/schema.json",
   "log": {
-    "level": "warn",
+    "level": "info",
     "timestamp": true
   },
   "dns": {
     "servers": [
       {
         "type": "local",
-        "tag": "系统DNS"
+        "tag": "本地DNS"
       },
       {
         "type": "https",
-        "tag": "阿里DNS",
-        "server": "223.5.5.5"
-      },
-      {
-        "type": "https",
-        "tag": "云端DNS",
+        "tag": "Cloudflare-DoH",
         "server": "1.1.1.1",
-        "detour": "手动选择",
-        "domain_resolver": "阿里DNS"
+        "server_port": 443,
+        "detour": "手动选择"
       }
     ],
     "rules": [
+      // 示例：自定义直连域名，照此行加
       {
-        "query_type": [
-          "AAAA",
-          "HTTPS"
-        ],
-        "action": "predefined",
-        "rcode": "NOERROR"
-      },
-      {
-        "rule_set": "广告拦截",
-        "action": "predefined",
-        "rcode": "NXDOMAIN"
-      },
-      {
-        "clash_mode": "Direct",
+        "domain_suffix": ["qq.com"],
         "action": "route",
-        "server": "阿里DNS"
+        "server": "本地DNS"
       },
       {
-        "clash_mode": "Global",
+        "rule_set": "苹果域名",
         "action": "route",
-        "server": "云端DNS"
+        "server": "本地DNS"
       },
       {
-        "rule_set": "GitHub",
+        "rule_set": "微软域名",
         "action": "route",
-        "server": "云端DNS"
+        "server": "本地DNS"
       },
       {
-        "rule_set": [
-          "苹果服务",
-          "微软服务",
-          "国内域名"
-        ],
+        "rule_set": "国内域名",
         "action": "route",
-        "server": "阿里DNS"
-      },
-      {
-        "rule_set": "谷歌服务",
-        "action": "route",
-        "server": "云端DNS"
+        "server": "本地DNS"
       }
     ],
-    "final": "云端DNS",
-    "strategy": "ipv4_only"
+    "final": "Cloudflare-DoH",
+    "strategy": "ipv4_only",
+    "cache_capacity": 4096
   },
   "inbounds": [
     {
       "type": "tun",
-      "tag": "tun入站",
-      "address": "172.19.0.1/30",
-      "mtu": 9000,
-      "auto_route": true,
-      "strict_route": true
-    },
-    {
-      "type": "mixed",
-      "tag": "混合入站",
-      "listen": "127.0.0.1",
-      "listen_port": 7890
+      "tag": "tun-in",
+      "address": ["172.18.0.1/30"],
+      "auto_route": true
+      // 排除某 App 不走 VPN：, "exclude_package": ["包名"]
     }
   ],
   "outbounds": [
+    // $SUB_STORE_NODES$ = 订阅节点注入点，由 merge-singbox.js 替换，勿删
+    // 默认选中第一项，想固定某节点把它的 tag 移到首位
     {
       "type": "selector",
       "tag": "手动选择",
-      "outbounds": [
-        "自动选择",
-        "__NODES__"
-      ],
-      "default": "自动选择"
+      "outbounds": ["自动选择", "$SUB_STORE_NODES$"],
+      "interrupt_exist_connections": true
     },
     {
       "type": "urltest",
       "tag": "自动选择",
-      "outbounds": [
-        "__NODES__"
-      ],
+      "outbounds": ["$SUB_STORE_NODES$"],
       "url": "https://www.gstatic.com/generate_204",
-      "interval": "3m",
+      "interval": "5m",
       "tolerance": 50
     },
     {
       "type": "selector",
       "tag": "苹果服务",
-      "outbounds": [
-        "直连",
-        "手动选择",
-        "自动选择"
-      ],
-      "default": "直连"
+      "outbounds": ["直连", "手动选择", "自动选择"]
     },
     {
       "type": "selector",
       "tag": "微软服务",
-      "outbounds": [
-        "直连",
-        "手动选择",
-        "自动选择"
-      ],
-      "default": "直连"
+      "outbounds": ["直连", "手动选择", "自动选择"]
     },
     {
       "type": "selector",
       "tag": "谷歌服务",
-      "outbounds": [
-        "手动选择",
-        "自动选择",
-        "直连"
-      ],
-      "default": "手动选择"
+      "outbounds": ["手动选择", "自动选择", "直连"]
     },
     {
       "type": "direct",
       "tag": "直连"
     },
-    {
-      "tag": "__NODES__"
-    }
+    "$SUB_STORE_NODES$"
   ],
   "route": {
     "rules": [
@@ -153,7 +102,17 @@
         "action": "hijack-dns"
       },
       {
-        "protocol": "quic",
+        "rule_set": "广告拦截",
+        "action": "reject"
+      },
+      {
+        "port": 853,
+        "action": "reject"
+      },
+      // 想放行国内 QUIC，把这条移到"国内直连"之后
+      {
+        "network": "udp",
+        "port": 443,
         "action": "reject"
       },
       {
@@ -161,115 +120,97 @@
         "action": "route",
         "outbound": "直连"
       },
+      // 示例：自定义直连域名，照此行加
       {
-        "clash_mode": "Direct",
+        "domain_suffix": ["qq.com"],
         "action": "route",
         "outbound": "直连"
       },
+      // 示例：自定义代理 IP，照此行加
       {
-        "clash_mode": "Global",
+        "ip_cidr": ["192.0.2.100/32"],
         "action": "route",
         "outbound": "手动选择"
       },
       {
-        "rule_set": "广告拦截",
-        "action": "reject"
-      },
-      {
-        "domain_suffix": "qq.com",
-        "action": "route",
-        "outbound": "直连"
-      },
-      {
-        "ip_cidr": "192.0.2.100/32",
-        "action": "route",
-        "outbound": "手动选择"
-      },
-      {
-        "rule_set": "苹果服务",
+        "rule_set": "苹果域名",
         "action": "route",
         "outbound": "苹果服务"
       },
       {
-        "rule_set": "GitHub",
-        "action": "route",
-        "outbound": "手动选择"
-      },
-      {
-        "rule_set": "微软服务",
+        "rule_set": "微软域名",
         "action": "route",
         "outbound": "微软服务"
       },
       {
-        "rule_set": "谷歌服务",
+        "rule_set": "谷歌域名",
         "action": "route",
         "outbound": "谷歌服务"
       },
       {
-        "rule_set": "国内域名",
-        "action": "route",
-        "outbound": "直连"
-      },
-      {
-        "rule_set": "国内IP",
+        "rule_set": ["国内域名", "国内IP"],
         "action": "route",
         "outbound": "直连"
       }
     ],
     "rule_set": [
       {
-        "type": "remote",
         "tag": "广告拦截",
+        "type": "remote",
         "format": "binary",
         "url": "https://gcore.jsdelivr.net/gh/217heidai/adblockfilters@main/rules/adblocksingbox.srs",
+        "http_client": { "detour": "直连" },
         "update_interval": "1d"
       },
       {
-        "type": "remote",
-        "tag": "苹果服务",
-        "format": "binary",
-        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-apple.srs",
-        "update_interval": "1d"
-      },
-      {
-        "type": "remote",
-        "tag": "GitHub",
-        "format": "binary",
-        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-github.srs",
-        "update_interval": "1d"
-      },
-      {
-        "type": "remote",
-        "tag": "微软服务",
-        "format": "binary",
-        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-microsoft.srs",
-        "update_interval": "1d"
-      },
-      {
-        "type": "remote",
-        "tag": "谷歌服务",
-        "format": "binary",
-        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-google.srs",
-        "update_interval": "1d"
-      },
-      {
-        "type": "remote",
         "tag": "国内域名",
+        "type": "remote",
         "format": "binary",
         "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-cn.srs",
+        "http_client": { "detour": "自动选择" },
         "update_interval": "1d"
       },
       {
-        "type": "remote",
         "tag": "国内IP",
+        "type": "remote",
         "format": "binary",
         "url": "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-cn.srs",
+        "http_client": { "detour": "自动选择" },
+        "update_interval": "1d"
+      },
+      {
+        "tag": "苹果域名",
+        "type": "remote",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-apple.srs",
+        "http_client": { "detour": "自动选择" },
+        "update_interval": "1d"
+      },
+      {
+        "tag": "微软域名",
+        "type": "remote",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-microsoft.srs",
+        "http_client": { "detour": "自动选择" },
+        "update_interval": "1d"
+      },
+      {
+        "tag": "谷歌域名",
+        "type": "remote",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-google.srs",
+        "http_client": { "detour": "自动选择" },
         "update_interval": "1d"
       }
     ],
     "final": "手动选择",
     "auto_detect_interface": true,
-    "default_domain_resolver": "阿里DNS"
+    // 接管其它 VPN 流量
+    "override_android_vpn": true,
+    "default_domain_resolver": {
+      "server": "本地DNS",
+      "strategy": "ipv4_only"
+    }
   },
   "experimental": {
     "cache_file": {
@@ -277,6 +218,7 @@
     },
     "clash_api": {
       "external_controller": "127.0.0.1:9090",
+      // 模式：Rule | Global | Direct
       "default_mode": "Rule"
     }
   }
