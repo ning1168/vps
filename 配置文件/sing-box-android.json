@@ -85,7 +85,7 @@
     {
       "type": "selector",
       "tag": "微软服务",
-      "outbounds": ["直连", "手动选择", "自动选择"]
+      "outbounds": ["手动选择", "直连", "自动选择"]
     },
     {
       "type": "selector",
